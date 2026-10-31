@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS watches (
   baseline REAL, last_alert_price REAL, cancel_deadline TEXT, created TEXT,
   last_checked TEXT, active INTEGER DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS site_ids (
+  site TEXT, key TEXT, hotel_id TEXT, city_id TEXT, ts TEXT, PRIMARY KEY (site, key)
+);
 CREATE TABLE IF NOT EXISTS feedback (
   id INTEGER PRIMARY KEY, ts TEXT, query_id INTEGER, shown_price REAL, seen_price REAL, note TEXT
 );
@@ -83,6 +86,22 @@ class Store:
 
     def stop_watch(self, wid: int, chat_id: int) -> bool:
         return self._exec("UPDATE watches SET active=0 WHERE id=? AND chat_id=?", (wid, chat_id)).rowcount > 0
+
+    # --- hotel ids on other sites (resolve.py) ---
+    def get_site_id(self, site: str, key: str) -> dict | None:
+        """{'hotel_id', 'city_id'} if known, {} for a recent miss (retried after a day), None if never looked up."""
+        with self.lock:
+            row = self.db.execute(
+                "SELECT hotel_id, city_id FROM site_ids WHERE site=? AND key=? AND "
+                "(hotel_id IS NOT NULL OR replace(ts,'T',' ') >= datetime('now','localtime','-1 day'))", (site, key)).fetchone()
+        if row is None:
+            return None
+        return {"hotel_id": row["hotel_id"], "city_id": row["city_id"]} if row["hotel_id"] else {}
+
+    def set_site_id(self, site: str, key: str, ids: dict | None) -> None:
+        ids = ids or {}
+        self._exec("INSERT OR REPLACE INTO site_ids (site, key, hotel_id, city_id, ts) VALUES (?,?,?,?,?)",
+                   (site, key, ids.get("hotel_id"), ids.get("city_id"), _now()))
 
     # --- feedback ---
     def add_feedback(self, qid: int | None, shown: float | None, seen: float | None, note: str = "") -> None:

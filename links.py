@@ -18,6 +18,11 @@ def _search_term(q: HotelQuery) -> str:
     return q.name
 
 
+def _ids(q: HotelQuery, site: str) -> dict:
+    """Ids resolved by resolve.enrich(); {} when unknown (-> search link)."""
+    return ((q.site_ids or {}).get(site) or {}) if q.site_ids else {}
+
+
 def booking_link(q: HotelQuery) -> str:
     params = {"ss": _search_term(q), "group_adults": q.adults, "no_rooms": q.rooms,
               "group_children": q.children}
@@ -29,6 +34,13 @@ def booking_link(q: HotelQuery) -> str:
 
 
 def agoda_link(q: HotelQuery) -> str:
+    hid = _ids(q, "agoda").get("hotel_id")
+    if hid:  # Agoda's partner deep link opens the hotel page itself
+        params = {"hid": hid, "cid": config.AGODA_CID or "-1", "NumberofAdults": q.adults,
+                  "NumberofChildren": q.children, "Rooms": q.rooms, "currency": "ILS"}
+        if q.has_dates:
+            params.update(checkIn=q.checkin.isoformat(), checkOut=q.checkout.isoformat())
+        return "https://www.agoda.com/partners/partnersearch.aspx?" + urlencode(params)
     params = {"textToSearch": _search_term(q), "adults": q.adults, "rooms": q.rooms,
               "children": q.children}
     if q.has_dates:
@@ -46,16 +58,26 @@ def is_trip(site: str | None) -> bool:
 
 
 def trip_link(q: HotelQuery, sub: str = "telegram") -> str:
-    """Trip.com search link. With the direct affiliate configured it carries
-    Allianceid + SID and trip_sub1=<source> (telegram / site / ig ...)."""
-    term = _search_term(q)
-    params = {"searchWord": term, "destName": term, "adult": q.adults, "crn": q.rooms,
-              "children": q.children, "barCurr": "ILS"}
+    """Trip.com link: the hotel's own page when its id was resolved, otherwise a search list.
+    With the direct affiliate configured it carries Allianceid + SID and trip_sub1=<source>
+    (telegram / site / ig ...)."""
+    ids = _ids(q, "trip")
+    if ids.get("hotel_id"):
+        params = {"hotelId": ids["hotel_id"]}
+        if ids.get("city_id"):
+            params["cityId"] = ids["city_id"]
+        params.update(adult=q.adults, children=q.children, crn=q.rooms, curr="ILS", barCurr="ILS")
+        base = "https://www.trip.com/hotels/detail/?"
+    else:
+        term = _search_term(q)
+        params = {"searchWord": term, "destName": term, "adult": q.adults, "crn": q.rooms,
+                  "children": q.children, "barCurr": "ILS"}
+        base = "https://www.trip.com/hotels/list?"
     if q.has_dates:
         params.update(checkin=q.checkin.isoformat(), checkout=q.checkout.isoformat())
     if config.TRIP_ALLIANCE_ID and config.TRIP_SID:
         params.update(Allianceid=config.TRIP_ALLIANCE_ID, SID=config.TRIP_SID, trip_sub1=sub)
-    return "https://www.trip.com/hotels/list?" + urlencode(params)
+    return base + urlencode(params)
 
 
 def _trip(q: HotelQuery, sub: str) -> str:
@@ -66,6 +88,12 @@ def _trip(q: HotelQuery, sub: str) -> str:
 
 
 def expedia_link(q: HotelQuery) -> str:
+    hid = _ids(q, "expedia").get("hotel_id")
+    if hid:  # hotel page: /h<id>.Hotel-Information
+        params = {"rm1": f"a{q.adults}"}
+        if q.has_dates:
+            params.update(chkin=q.checkin.isoformat(), chkout=q.checkout.isoformat())
+        return f"https://www.expedia.com/h{hid}.Hotel-Information?" + urlencode(params)
     params = {"destination": _search_term(q), "adults": q.adults, "rooms": q.rooms}
     if q.has_dates:
         params.update(startDate=q.checkin.isoformat(), endDate=q.checkout.isoformat())

@@ -14,6 +14,7 @@ from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, Con
 import config
 import messages as M
 import pricing
+import resolve
 import vision
 from links import is_trip, link_for_site
 from parsing import HotelQuery, extract_url, parse_dates, parse_free_text, parse_price
@@ -52,6 +53,7 @@ async def show_results(context, chat_id: int, chat_type: str, q: HotelQuery, sou
     comparable = user_price if (currency or "ILS") == "ILS" else None
     v = pricing.make_verdict(comparable, offers)
     store.set_verdict(qid, v.kind, v.best.site if v.best else None, v.best.total if v.best else None)
+    await resolve.enrich(q, store)  # buttons open the hotel's own page where we can find it
     text, kb = M.result(q, user_price, currency, v, qid, pricing.enabled(), chat_type == ChatType.PRIVATE)
     await send(context, chat_id, text, kb)
 
@@ -277,6 +279,8 @@ async def check_watches(context: ContextTypes.DEFAULT_TYPE) -> None:
             store.update_watch(w["id"], baseline=best.total)
             continue
         if pricing.price_drop(ref, best.total):
+            if not best.url:
+                await resolve.enrich(q, store)
             url = best.url or link_for_site(best.site, q)
             kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"🔎 {best.site} · {M.ils(best.total)}", url=url)]]) if url else None
             try:

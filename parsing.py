@@ -24,6 +24,7 @@ class HotelQuery:
     city: str | None = None
     site: str | None = None        # where the user found it, e.g. "Booking"
     source_url: str | None = None
+    site_ids: dict | None = None    # resolve.py: {"trip": {"hotel_id", "city_id"}, "agoda": ..., "expedia": ...}
 
     @property
     def nights(self) -> int | None:
